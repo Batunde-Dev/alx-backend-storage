@@ -39,5 +39,4 @@ class Cache:
 
     def get_int(self, value: str) -> int:
         """ get an int """
-        return self.get(self._key, int
-                )
+        return self.get(self._key, int)
