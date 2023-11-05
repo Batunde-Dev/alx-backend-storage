@@ -1,42 +1,80 @@
 #!/usr/bin/env python3
-""" Module for Redis db """
 import redis
-from uuid import uuid4
+import uuid
 from typing import Union, Callable, Optional
+from functools import wraps
 
 
-UnionOfTypes = Union[str, bytes, int, float]
+def count_calls(method: Callable) -> Callable:
+    ''' def count calls '''
+    @wraps(method)
+    def wrapper(self, *args, **kwds):
+        ''' def wrapper '''
+        key_name = method.__qualname__
+        self._redis.incr(key_name, 0) + 1
+        return method(self, *args, **kwds)
+    return wrapper
 
 
-class Cache:
-    """ Class for methods that operate a caching system """
+def call_history(method: Callable) -> Callable:
+    ''' def call history '''
+    @wraps(method)
+    def wrapper(self, *args, **kwds):
+        ''' def wrapper'''
+        key_m = method.__qualname__
+        inp_m = key_m + ':inputs'
+        outp_m = key_m + ":outputs"
+        data = str(args)
+        self._redis.rpush(inp_m, data)
+        fin = method(self, *args, **kwds)
+        self._redis.rpush(outp_m, str(fin))
+        return fin
+    return wrapper
 
+
+def replay(func: Callable):
+    '''def replay'''
+    r = redis.Redis()
+    key_m = func.__qualname__
+    inp_m = r.lrange("{}:inputs".format(key_m), 0, -1)
+    outp_m = r.lrange("{}:outputs".format(key_m), 0, -1)
+    calls_number = len(inp_m)
+    times_str = 'times'
+    if calls_number == 1:
+        times_str = 'time'
+    fin = '{} was called {} {}:'.format(key_m, calls_number, times_str)
+    print(fin)
+    for k, v in zip(inp_m, outp_m):
+        fin = '{}(*{}) -> {}'.format(
+            key_m,
+            k.decode('utf-8'),
+            v.decode('utf-8')
+        )
+        print(fin)
+
+
+class Cache():
+    ''' class cache '''
     def __init__(self):
-        """ Instance of the Redis db """
+        ''' def init '''
         self._redis = redis.Redis()
         self._redis.flushdb()
 
-    def store(self, data: UnionOfTypes) -> str:
-        """
-        Method takes a data argument and returns a string
-        """
-        self._key = str(uuid4())
-        self._redis.set(self._key, data)
-        return self._key
+    def store(self, data: Union[str, bytes, int, float]) -> str:
+        ''' def store '''
+        generate = str(uuid.uuid4())
+        self._redis.set(generate, data)
+        return generate
 
     def get(self, key: str,
-            fn: Optional[Callable] = None) -> UnionOfTypes:
-        """
-        Retrieves data stored in redis using a key
-        converts the result/value back to the desired format
-        """
+            fn: Optional[Callable] = None) -> Union[str, bytes, int, float]:
+        ''' def get '''
         value = self._redis.get(key)
-        return fn(value) if fn else value
+        return value if not fn else fn(value)
 
-    def get_str(self, value: str) -> str:
-        """ get a string """
-        return self.get(self._key, str)
+    def get_int(self, key):
+        return self.get(key, int)
 
-    def get_int(self, value: str) -> int:
-        """ get an int """
-        return self.get(self._key, int)
+    def get_str(self, key):
+        value = self._redis.get(key)
+        return value.decode("utf-8")
